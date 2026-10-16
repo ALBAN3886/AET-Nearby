@@ -11,12 +11,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
+import android.net.wifi.WifiNetworkSpecifier
+import android.text.InputType
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -28,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private val seen = mutableSetOf<String>()
     private var receiverRegistered = false
+    private var wifiNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
         val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -77,19 +84,19 @@ class MainActivity : Activity() {
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(28, 28, 28, 20)
-            setBackgroundColor(0xFFF4F7FB.toInt())
+            setBackgroundColor(0xFF071426.toInt())
         }
 
         val title = TextView(this).apply {
             text = "AET NEARBY"
             textSize = 28f
-            setTextColor(0xFF123B70.toInt())
+            setTextColor(0xFF16C7E8.toInt())
             gravity = Gravity.CENTER
         }
         root.addView(title)
 
         val subtitle = TextView(this).apply {
-            text = "AET TECHNOLOGY • Scanner de proximité"
+            text = "AET TECHNOLOGY • CONNECTIVITÉ INTELLIGENTE"
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(0, 8, 0, 22)
@@ -115,6 +122,20 @@ class MainActivity : Activity() {
         }
         root.addView(wifiButton, matchWidth())
 
+        val connectButton = Button(this).apply {
+            text = "Se connecter à un Wi-Fi"
+            setOnClickListener { showWifiConnectDialog() }
+        }
+        root.addView(connectButton, matchWidth())
+
+        val savedButton = Button(this).apply {
+            text = "Gérer les réseaux enregistrés"
+            setOnClickListener {
+                startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+            }
+        }
+        root.addView(savedButton, matchWidth())
+
         val clearButton = Button(this).apply {
             text = "Effacer les résultats"
             setOnClickListener {
@@ -128,7 +149,7 @@ class MainActivity : Activity() {
         val heading = TextView(this).apply {
             text = "RÉSULTATS"
             textSize = 18f
-            setTextColor(0xFF123B70.toInt())
+            setTextColor(0xFF16C7E8.toInt())
             setPadding(0, 18, 0, 8)
         }
         root.addView(heading)
@@ -222,6 +243,112 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun showWifiConnectDialog() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Toast.makeText(this, "Connexion directe disponible sur Android 10 et plus", Toast.LENGTH_LONG).show()
+            startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+            return
+        }
+
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 8, 32, 0)
+        }
+
+        val ssidInput = EditText(this).apply {
+            hint = "Nom exact du Wi-Fi (SSID)"
+            singleLine = true
+        }
+        form.addView(ssidInput)
+
+        val passwordInput = EditText(this).apply {
+            hint = "Mot de passe (laisser vide si réseau ouvert)"
+            singleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        form.addView(passwordInput)
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Connexion Wi-Fi • AET")
+            .setMessage("Choisis un réseau auquel tu es autorisé à accéder.")
+            .setView(form)
+            .setNegativeButton("Annuler", null)
+            .setPositiveButton("Continuer") { _, _ ->
+                val ssid = ssidInput.text.toString().trim()
+                val password = passwordInput.text.toString()
+
+                if (ssid.isEmpty()) {
+                    Toast.makeText(this, "Saisis le nom du réseau", Toast.LENGTH_SHORT).show()
+                } else {
+                    requestWifiConnection(ssid, password)
+                }
+            }
+            .show()
+    }
+
+    private fun requestWifiConnection(ssid: String, password: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+
+        try {
+            val specifierBuilder = WifiNetworkSpecifier.Builder().setSsid(ssid)
+
+            if (password.isNotEmpty()) {
+                specifierBuilder.setWpa2Passphrase(password)
+            }
+
+            val request = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .setNetworkSpecifier(specifierBuilder.build())
+                .build()
+
+            val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+            wifiNetworkCallback?.let {
+                try {
+                    manager.unregisterNetworkCallback(it)
+                } catch (_: Exception) {
+                }
+            }
+
+            status.text = "Demande de connexion à $ssid…"
+
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    runOnUiThread {
+                        status.text = "Wi-Fi connecté : $ssid"
+                        Toast.makeText(this@MainActivity, "Connexion établie", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                override fun onUnavailable() {
+                    runOnUiThread {
+                        status.text = "Connexion impossible à $ssid"
+                        Toast.makeText(this@MainActivity, "Vérifie le mot de passe et la disponibilité du réseau", Toast.LENGTH_LONG).show()
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    runOnUiThread {
+                        status.text = "Connexion Wi-Fi perdue"
+                    }
+                }
+            }
+
+            wifiNetworkCallback = callback
+            manager.requestNetwork(request, callback)
+
+            Toast.makeText(
+                this,
+                "Valide la demande système Android si elle apparaît",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            status.text = "Erreur de connexion Wi-Fi"
+            Toast.makeText(this, "Connexion impossible : ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun startWifiScan() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
@@ -280,7 +407,7 @@ class MainActivity : Activity() {
         val heading = TextView(this).apply {
             text = "[$type] $name"
             textSize = 16f
-            setTextColor(0xFF123B70.toInt())
+            setTextColor(0xFF16C7E8.toInt())
         }
         card.addView(heading)
 
