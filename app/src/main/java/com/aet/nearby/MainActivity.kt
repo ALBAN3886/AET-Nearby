@@ -257,13 +257,13 @@ class MainActivity : Activity() {
 
         val ssidInput = EditText(this).apply {
             hint = "Nom exact du Wi-Fi (SSID)"
-            singleLine = true
+            isSingleLine = true
         }
         form.addView(ssidInput)
 
         val passwordInput = EditText(this).apply {
             hint = "Mot de passe (laisser vide si réseau ouvert)"
-            singleLine = true
+            isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
